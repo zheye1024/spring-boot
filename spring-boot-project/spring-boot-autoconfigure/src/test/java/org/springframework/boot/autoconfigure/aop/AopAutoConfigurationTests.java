@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2018 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,9 +18,12 @@ package org.springframework.boot.autoconfigure.aop;
 
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
-import org.junit.Test;
+import org.aspectj.weaver.Advice;
+import org.junit.jupiter.api.Test;
 
+import org.springframework.aop.support.AopUtils;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.assertj.AssertableApplicationContext;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.context.runner.ContextConsumer;
@@ -28,6 +31,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.web.bind.annotation.RequestMapping;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,15 +43,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author Eberhard Wolff
  * @author Stephane Nicoll
  */
-public class AopAutoConfigurationTests {
+class AopAutoConfigurationTests {
 
 	private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
 			.withConfiguration(AutoConfigurations.of(AopAutoConfiguration.class));
 
 	@Test
-	public void aopDisabled() {
-		this.contextRunner.withUserConfiguration(TestConfiguration.class)
-				.withPropertyValues("spring.aop.auto:false").run((context) -> {
+	void aopDisabled() {
+		this.contextRunner.withUserConfiguration(TestConfiguration.class).withPropertyValues("spring.aop.auto:false")
+				.run((context) -> {
 					TestAspect aspect = context.getBean(TestAspect.class);
 					assertThat(aspect.isCalled()).isFalse();
 					TestBean bean = context.getBean(TestBean.class);
@@ -55,29 +61,36 @@ public class AopAutoConfigurationTests {
 	}
 
 	@Test
-	public void aopWithDefaultSettings() {
-		this.contextRunner.withUserConfiguration(TestConfiguration.class)
-				.run(proxyTargetClassEnabled());
+	void aopWithDefaultSettings() {
+		this.contextRunner.withUserConfiguration(TestConfiguration.class).run(proxyTargetClassEnabled());
 	}
 
 	@Test
-	public void aopWithEnabledProxyTargetClass() {
+	void aopWithEnabledProxyTargetClass() {
 		this.contextRunner.withUserConfiguration(TestConfiguration.class)
-				.withPropertyValues("spring.aop.proxy-target-class:true")
-				.run(proxyTargetClassEnabled());
+				.withPropertyValues("spring.aop.proxy-target-class:true").run(proxyTargetClassEnabled());
 	}
 
 	@Test
-	public void aopWithDisabledProxyTargetClass() {
+	void aopWithDisabledProxyTargetClass() {
 		this.contextRunner.withUserConfiguration(TestConfiguration.class)
-				.withPropertyValues("spring.aop.proxy-target-class:false")
-				.run(proxyTargetClassDisabled());
+				.withPropertyValues("spring.aop.proxy-target-class:false").run(proxyTargetClassDisabled());
 	}
 
 	@Test
-	public void customConfigurationWithProxyTargetClassDefaultDoesNotDisableProxying() {
-		this.contextRunner.withUserConfiguration(CustomTestConfiguration.class)
-				.run(proxyTargetClassEnabled());
+	void customConfigurationWithProxyTargetClassDefaultDoesNotDisableProxying() {
+		this.contextRunner.withUserConfiguration(CustomTestConfiguration.class).run(proxyTargetClassEnabled());
+
+	}
+
+	@Test
+	void whenGlobalMethodSecurityIsEnabledAndAspectJIsNotAvailableThenClassProxyingIsStillUsedByDefault() {
+		this.contextRunner.withClassLoader(new FilteredClassLoader(Advice.class))
+				.withUserConfiguration(ExampleController.class, EnableGlobalMethodSecurityConfiguration.class)
+				.run((context) -> {
+					ExampleController exampleController = context.getBean(ExampleController.class);
+					assertThat(AopUtils.isCglibProxy(exampleController)).isTrue();
+				});
 	}
 
 	private ContextConsumer<AssertableApplicationContext> proxyTargetClassEnabled() {
@@ -102,28 +115,28 @@ public class AopAutoConfigurationTests {
 	}
 
 	@EnableAspectJAutoProxy
-	@Configuration
+	@Configuration(proxyBeanMethods = false)
 	@Import(TestConfiguration.class)
-	protected static class CustomTestConfiguration {
+	static class CustomTestConfiguration {
 
 	}
 
-	@Configuration
-	protected static class TestConfiguration {
+	@Configuration(proxyBeanMethods = false)
+	static class TestConfiguration {
 
 		@Bean
-		public TestAspect aspect() {
+		TestAspect aspect() {
 			return new TestAspect();
 		}
 
 		@Bean
-		public TestInterface bean() {
+		TestInterface bean() {
 			return new TestBean();
 		}
 
 	}
 
-	protected static class TestBean implements TestInterface {
+	static class TestBean implements TestInterface {
 
 		@Override
 		public void foo() {
@@ -132,24 +145,45 @@ public class AopAutoConfigurationTests {
 	}
 
 	@Aspect
-	protected static class TestAspect {
+	static class TestAspect {
 
 		private boolean called;
 
-		public boolean isCalled() {
+		boolean isCalled() {
 			return this.called;
 		}
 
 		@Before("execution(* foo(..))")
-		public void before() {
+		void before() {
 			this.called = true;
 		}
 
 	}
 
-	public interface TestInterface {
+	interface TestInterface {
 
 		void foo();
+
+	}
+
+	@EnableGlobalMethodSecurity(prePostEnabled = true)
+	@Configuration(proxyBeanMethods = false)
+	static class EnableGlobalMethodSecurityConfiguration {
+
+	}
+
+	public static class ExampleController implements TestInterface {
+
+		@RequestMapping("/test")
+		@PreAuthorize("true")
+		String demo() {
+			return "test";
+		}
+
+		@Override
+		public void foo() {
+
+		}
 
 	}
 

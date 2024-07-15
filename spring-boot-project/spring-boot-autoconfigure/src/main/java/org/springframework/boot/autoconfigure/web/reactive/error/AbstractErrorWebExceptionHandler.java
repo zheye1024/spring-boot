@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,6 @@
 
 package org.springframework.boot.autoconfigure.web.reactive.error;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
@@ -29,12 +28,15 @@ import reactor.core.publisher.Mono;
 
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.autoconfigure.template.TemplateAvailabilityProviders;
-import org.springframework.boot.autoconfigure.web.ResourceProperties;
+import org.springframework.boot.autoconfigure.web.WebProperties.Resources;
+import org.springframework.boot.web.error.ErrorAttributeOptions;
+import org.springframework.boot.web.error.ErrorAttributeOptions.Include;
 import org.springframework.boot.web.reactive.error.ErrorAttributes;
 import org.springframework.boot.web.reactive.error.ErrorWebExceptionHandler;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.core.io.Resource;
+import org.springframework.core.log.LogMessage;
 import org.springframework.http.HttpLogging;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.codec.HttpMessageReader;
@@ -54,26 +56,33 @@ import org.springframework.web.util.HtmlUtils;
  * Abstract base class for {@link ErrorWebExceptionHandler} implementations.
  *
  * @author Brian Clozel
+ * @author Scott Frederick
  * @since 2.0.0
  * @see ErrorAttributes
  */
-public abstract class AbstractErrorWebExceptionHandler
-		implements ErrorWebExceptionHandler, InitializingBean {
+public abstract class AbstractErrorWebExceptionHandler implements ErrorWebExceptionHandler, InitializingBean {
 
 	/**
 	 * Currently duplicated from Spring WebFlux HttpWebHandlerAdapter.
 	 */
-	private static final Set<String> DISCONNECTED_CLIENT_EXCEPTIONS = new HashSet<>(
-			Arrays.asList("ClientAbortException", "EOFException", "EofException"));
+	private static final Set<String> DISCONNECTED_CLIENT_EXCEPTIONS;
 
-	private static final Log logger = HttpLogging
-			.forLogName(AbstractErrorWebExceptionHandler.class);
+	static {
+		Set<String> exceptions = new HashSet<>();
+		exceptions.add("AbortedException");
+		exceptions.add("ClientAbortException");
+		exceptions.add("EOFException");
+		exceptions.add("EofException");
+		DISCONNECTED_CLIENT_EXCEPTIONS = Collections.unmodifiableSet(exceptions);
+	}
+
+	private static final Log logger = HttpLogging.forLogName(AbstractErrorWebExceptionHandler.class);
 
 	private final ApplicationContext applicationContext;
 
 	private final ErrorAttributes errorAttributes;
 
-	private final ResourceProperties resourceProperties;
+	private final Resources resources;
 
 	private final TemplateAvailabilityProviders templateAvailabilityProviders;
 
@@ -83,17 +92,37 @@ public abstract class AbstractErrorWebExceptionHandler
 
 	private List<ViewResolver> viewResolvers = Collections.emptyList();
 
+	/**
+	 * Create a new {@code AbstractErrorWebExceptionHandler}.
+	 * @param errorAttributes the error attributes
+	 * @param resourceProperties the resource properties
+	 * @param applicationContext the application context
+	 * @deprecated since 2.4.0 for removal in 2.6.0 in favor of
+	 * {@link #AbstractErrorWebExceptionHandler(ErrorAttributes, Resources, ApplicationContext)}
+	 */
+	@Deprecated
 	public AbstractErrorWebExceptionHandler(ErrorAttributes errorAttributes,
-			ResourceProperties resourceProperties,
+			org.springframework.boot.autoconfigure.web.ResourceProperties resourceProperties,
+			ApplicationContext applicationContext) {
+		this(errorAttributes, (Resources) resourceProperties, applicationContext);
+	}
+
+	/**
+	 * Create a new {@code AbstractErrorWebExceptionHandler}.
+	 * @param errorAttributes the error attributes
+	 * @param resources the resources configuration properties
+	 * @param applicationContext the application context
+	 * @since 2.4.0
+	 */
+	public AbstractErrorWebExceptionHandler(ErrorAttributes errorAttributes, Resources resources,
 			ApplicationContext applicationContext) {
 		Assert.notNull(errorAttributes, "ErrorAttributes must not be null");
-		Assert.notNull(resourceProperties, "ResourceProperties must not be null");
+		Assert.notNull(resources, "Resources must not be null");
 		Assert.notNull(applicationContext, "ApplicationContext must not be null");
 		this.errorAttributes = errorAttributes;
-		this.resourceProperties = resourceProperties;
+		this.resources = resources;
 		this.applicationContext = applicationContext;
-		this.templateAvailabilityProviders = new TemplateAvailabilityProviders(
-				applicationContext);
+		this.templateAvailabilityProviders = new TemplateAvailabilityProviders(applicationContext);
 	}
 
 	/**
@@ -127,11 +156,25 @@ public abstract class AbstractErrorWebExceptionHandler
 	 * views or JSON payloads.
 	 * @param request the source request
 	 * @param includeStackTrace whether to include the error stacktrace information
-	 * @return the error attributes as a Map.
+	 * @return the error attributes as a Map
+	 * @deprecated since 2.3.0 for removal in 2.5.0 in favor of
+	 * {@link #getErrorAttributes(ServerRequest, ErrorAttributeOptions)}
 	 */
-	protected Map<String, Object> getErrorAttributes(ServerRequest request,
-			boolean includeStackTrace) {
-		return this.errorAttributes.getErrorAttributes(request, includeStackTrace);
+	@Deprecated
+	protected Map<String, Object> getErrorAttributes(ServerRequest request, boolean includeStackTrace) {
+		return getErrorAttributes(request,
+				(includeStackTrace) ? ErrorAttributeOptions.of(Include.STACK_TRACE) : ErrorAttributeOptions.defaults());
+	}
+
+	/**
+	 * Extract the error attributes from the current request, to be used to populate error
+	 * views or JSON payloads.
+	 * @param request the source request
+	 * @param options options to control error attributes
+	 * @return the error attributes as a Map
+	 */
+	protected Map<String, Object> getErrorAttributes(ServerRequest request, ErrorAttributeOptions options) {
+		return this.errorAttributes.getErrorAttributes(request, options);
 	}
 
 	/**
@@ -149,7 +192,31 @@ public abstract class AbstractErrorWebExceptionHandler
 	 * @return {@code true} if the error trace has been requested, {@code false} otherwise
 	 */
 	protected boolean isTraceEnabled(ServerRequest request) {
-		String parameter = request.queryParam("trace").orElse("false");
+		return getBooleanParameter(request, "trace");
+	}
+
+	/**
+	 * Check whether the message attribute has been set on the given request.
+	 * @param request the source request
+	 * @return {@code true} if the message attribute has been requested, {@code false}
+	 * otherwise
+	 */
+	protected boolean isMessageEnabled(ServerRequest request) {
+		return getBooleanParameter(request, "message");
+	}
+
+	/**
+	 * Check whether the errors attribute has been set on the given request.
+	 * @param request the source request
+	 * @return {@code true} if the errors attribute has been requested, {@code false}
+	 * otherwise
+	 */
+	protected boolean isBindingErrorsEnabled(ServerRequest request) {
+		return getBooleanParameter(request, "errors");
+	}
+
+	private boolean getBooleanParameter(ServerRequest request, String parameterName) {
+		String parameter = request.queryParam(parameterName).orElse("false");
 		return !"false".equalsIgnoreCase(parameter);
 	}
 
@@ -162,8 +229,8 @@ public abstract class AbstractErrorWebExceptionHandler
 	 * @param error the error data as a map
 	 * @return a Publisher of the {@link ServerResponse}
 	 */
-	protected Mono<ServerResponse> renderErrorView(String viewName,
-			ServerResponse.BodyBuilder responseBody, Map<String, Object> error) {
+	protected Mono<ServerResponse> renderErrorView(String viewName, ServerResponse.BodyBuilder responseBody,
+			Map<String, Object> error) {
 		if (isTemplateAvailable(viewName)) {
 			return responseBody.render(viewName, error);
 		}
@@ -175,12 +242,11 @@ public abstract class AbstractErrorWebExceptionHandler
 	}
 
 	private boolean isTemplateAvailable(String viewName) {
-		return this.templateAvailabilityProviders.getProvider(viewName,
-				this.applicationContext) != null;
+		return this.templateAvailabilityProviders.getProvider(viewName, this.applicationContext) != null;
 	}
 
 	private Resource resolveResource(String viewName) {
-		for (String location : this.resourceProperties.getStaticLocations()) {
+		for (String location : this.resources.getStaticLocations()) {
 			try {
 				Resource resource = this.applicationContext.getResource(location);
 				resource = resource.createRelative(viewName + ".html");
@@ -203,27 +269,26 @@ public abstract class AbstractErrorWebExceptionHandler
 	 * @param error the error data as a map
 	 * @return a Publisher of the {@link ServerResponse}
 	 */
-	protected Mono<ServerResponse> renderDefaultErrorView(
-			ServerResponse.BodyBuilder responseBody, Map<String, Object> error) {
+	protected Mono<ServerResponse> renderDefaultErrorView(ServerResponse.BodyBuilder responseBody,
+			Map<String, Object> error) {
 		StringBuilder builder = new StringBuilder();
 		Date timestamp = (Date) error.get("timestamp");
 		Object message = error.get("message");
 		Object trace = error.get("trace");
-		builder.append("<html><body><h1>Whitelabel Error Page</h1>").append(
-				"<p>This application has no configured error view, so you are seeing this as a fallback.</p>")
-				.append("<div id='created'>").append(timestamp).append("</div>")
-				.append("<div>There was an unexpected error (type=")
-				.append(htmlEscape(error.get("error"))).append(", status=")
-				.append(htmlEscape(error.get("status"))).append(").</div>");
+		Object requestId = error.get("requestId");
+		builder.append("<html><body><h1>Whitelabel Error Page</h1>")
+				.append("<p>This application has no configured error view, so you are seeing this as a fallback.</p>")
+				.append("<div id='created'>").append(timestamp).append("</div>").append("<div>[").append(requestId)
+				.append("] There was an unexpected error (type=").append(htmlEscape(error.get("error")))
+				.append(", status=").append(htmlEscape(error.get("status"))).append(").</div>");
 		if (message != null) {
 			builder.append("<div>").append(htmlEscape(message)).append("</div>");
 		}
 		if (trace != null) {
-			builder.append("<div style='white-space:pre-wrap;'>")
-					.append(htmlEscape(trace)).append("</div>");
+			builder.append("<div style='white-space:pre-wrap;'>").append(htmlEscape(trace)).append("</div>");
 		}
 		builder.append("</body></html>");
-		return responseBody.syncBody(builder.toString());
+		return responseBody.bodyValue(builder.toString());
 	}
 
 	private String htmlEscape(Object input) {
@@ -248,48 +313,54 @@ public abstract class AbstractErrorWebExceptionHandler
 	 * information
 	 * @return a {@link RouterFunction} that routes and handles errors
 	 */
-	protected abstract RouterFunction<ServerResponse> getRoutingFunction(
-			ErrorAttributes errorAttributes);
+	protected abstract RouterFunction<ServerResponse> getRoutingFunction(ErrorAttributes errorAttributes);
 
 	@Override
 	public Mono<Void> handle(ServerWebExchange exchange, Throwable throwable) {
-		if (exchange.getResponse().isCommitted()
-				|| isDisconnectedClientError(throwable)) {
+		if (exchange.getResponse().isCommitted() || isDisconnectedClientError(throwable)) {
 			return Mono.error(throwable);
 		}
 		this.errorAttributes.storeErrorInformation(throwable, exchange);
 		ServerRequest request = ServerRequest.create(exchange, this.messageReaders);
-		return getRoutingFunction(this.errorAttributes).route(request)
-				.switchIfEmpty(Mono.error(throwable))
+		return getRoutingFunction(this.errorAttributes).route(request).switchIfEmpty(Mono.error(throwable))
 				.flatMap((handler) -> handler.handle(request))
 				.doOnNext((response) -> logError(request, response, throwable))
 				.flatMap((response) -> write(exchange, response));
 	}
 
 	private boolean isDisconnectedClientError(Throwable ex) {
-		String message = NestedExceptionUtils.getMostSpecificCause(ex).getMessage();
-		if (message != null && message.toLowerCase().contains("broken pipe")) {
-			return true;
-		}
-		return DISCONNECTED_CLIENT_EXCEPTIONS.contains(ex.getClass().getSimpleName());
+		return DISCONNECTED_CLIENT_EXCEPTIONS.contains(ex.getClass().getSimpleName())
+				|| isDisconnectedClientErrorMessage(NestedExceptionUtils.getMostSpecificCause(ex).getMessage());
 	}
 
-	private void logError(ServerRequest request, ServerResponse response,
-			Throwable throwable) {
+	private boolean isDisconnectedClientErrorMessage(String message) {
+		message = (message != null) ? message.toLowerCase() : "";
+		return (message.contains("broken pipe") || message.contains("connection reset by peer"));
+	}
+
+	/**
+	 * Logs the {@code throwable} error for the given {@code request} and {@code response}
+	 * exchange. The default implementation logs all errors at debug level. Additionally,
+	 * any internal server error (500) is logged at error level.
+	 * @param request the request that was being handled
+	 * @param response the response that was being sent
+	 * @param throwable the error to be logged
+	 * @since 2.2.0
+	 */
+	protected void logError(ServerRequest request, ServerResponse response, Throwable throwable) {
 		if (logger.isDebugEnabled()) {
-			logger.debug(
-					request.exchange().getLogPrefix() + formatError(throwable, request));
+			logger.debug(request.exchange().getLogPrefix() + formatError(throwable, request));
 		}
-		if (response.statusCode().equals(HttpStatus.INTERNAL_SERVER_ERROR)) {
-			logger.error(request.exchange().getLogPrefix() + "500 Server Error for "
-					+ formatRequest(request), throwable);
+		if (HttpStatus.resolve(response.rawStatusCode()) != null
+				&& response.statusCode().equals(HttpStatus.INTERNAL_SERVER_ERROR)) {
+			logger.error(LogMessage.of(() -> String.format("%s 500 Server Error for %s",
+					request.exchange().getLogPrefix(), formatRequest(request))), throwable);
 		}
 	}
 
 	private String formatError(Throwable ex, ServerRequest request) {
 		String reason = ex.getClass().getSimpleName() + ": " + ex.getMessage();
-		return "Resolved [" + reason + "] for HTTP " + request.methodName() + " "
-				+ request.path();
+		return "Resolved [" + reason + "] for HTTP " + request.methodName() + " " + request.path();
 	}
 
 	private String formatRequest(ServerRequest request) {
@@ -298,11 +369,9 @@ public abstract class AbstractErrorWebExceptionHandler
 		return "HTTP " + request.methodName() + " \"" + request.path() + query + "\"";
 	}
 
-	private Mono<? extends Void> write(ServerWebExchange exchange,
-			ServerResponse response) {
+	private Mono<? extends Void> write(ServerWebExchange exchange, ServerResponse response) {
 		// force content-type since writeTo won't overwrite response header values
-		exchange.getResponse().getHeaders()
-				.setContentType(response.headers().getContentType());
+		exchange.getResponse().getHeaders().setContentType(response.headers().getContentType());
 		return response.writeTo(exchange, new ResponseContext());
 	}
 

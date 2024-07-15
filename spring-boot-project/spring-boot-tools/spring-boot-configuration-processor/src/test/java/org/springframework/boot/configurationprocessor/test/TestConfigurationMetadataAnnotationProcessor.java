@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,10 @@ package org.springframework.boot.configurationprocessor.test;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;
@@ -36,10 +40,16 @@ import org.springframework.boot.configurationprocessor.metadata.JsonMarshaller;
  * @author Andy Wilkinson
  * @author Kris De Volder
  */
-@SupportedAnnotationTypes({ "*" })
+@SupportedAnnotationTypes({ TestConfigurationMetadataAnnotationProcessor.CONFIGURATION_PROPERTIES_ANNOTATION,
+		TestConfigurationMetadataAnnotationProcessor.CONTROLLER_ENDPOINT_ANNOTATION,
+		TestConfigurationMetadataAnnotationProcessor.ENDPOINT_ANNOTATION,
+		TestConfigurationMetadataAnnotationProcessor.JMX_ENDPOINT_ANNOTATION,
+		TestConfigurationMetadataAnnotationProcessor.REST_CONTROLLER_ENDPOINT_ANNOTATION,
+		TestConfigurationMetadataAnnotationProcessor.SERVLET_ENDPOINT_ANNOTATION,
+		TestConfigurationMetadataAnnotationProcessor.WEB_ENDPOINT_ANNOTATION,
+		"org.springframework.context.annotation.Configuration" })
 @SupportedSourceVersion(SourceVersion.RELEASE_6)
-public class TestConfigurationMetadataAnnotationProcessor
-		extends ConfigurationMetadataAnnotationProcessor {
+public class TestConfigurationMetadataAnnotationProcessor extends ConfigurationMetadataAnnotationProcessor {
 
 	public static final String CONFIGURATION_PROPERTIES_ANNOTATION = "org.springframework.boot.configurationsample.ConfigurationProperties";
 
@@ -47,9 +57,25 @@ public class TestConfigurationMetadataAnnotationProcessor
 
 	public static final String DEPRECATED_CONFIGURATION_PROPERTY_ANNOTATION = "org.springframework.boot.configurationsample.DeprecatedConfigurationProperty";
 
+	public static final String CONSTRUCTOR_BINDING_ANNOTATION = "org.springframework.boot.configurationsample.ConstructorBinding";
+
+	public static final String DEFAULT_VALUE_ANNOTATION = "org.springframework.boot.configurationsample.DefaultValue";
+
+	public static final String CONTROLLER_ENDPOINT_ANNOTATION = "org.springframework.boot.configurationsample.ControllerEndpoint";
+
 	public static final String ENDPOINT_ANNOTATION = "org.springframework.boot.configurationsample.Endpoint";
 
+	public static final String JMX_ENDPOINT_ANNOTATION = "org.springframework.boot.configurationsample.JmxEndpoint";
+
+	public static final String REST_CONTROLLER_ENDPOINT_ANNOTATION = "org.springframework.boot.configurationsample.RestControllerEndpoint";
+
+	public static final String SERVLET_ENDPOINT_ANNOTATION = "org.springframework.boot.configurationsample.ServletEndpoint";
+
+	public static final String WEB_ENDPOINT_ANNOTATION = "org.springframework.boot.configurationsample.WebEndpoint";
+
 	public static final String READ_OPERATION_ANNOTATION = "org.springframework.boot.configurationsample.ReadOperation";
+
+	public static final String NAME_ANNOTATION = "org.springframework.boot.configurationsample.Name";
 
 	private ConfigurationMetadata metadata;
 
@@ -75,8 +101,19 @@ public class TestConfigurationMetadataAnnotationProcessor
 	}
 
 	@Override
-	protected String endpointAnnotation() {
-		return ENDPOINT_ANNOTATION;
+	protected String constructorBindingAnnotation() {
+		return CONSTRUCTOR_BINDING_ANNOTATION;
+	}
+
+	@Override
+	protected String defaultValueAnnotation() {
+		return DEFAULT_VALUE_ANNOTATION;
+	}
+
+	@Override
+	protected Set<String> endpointAnnotations() {
+		return new HashSet<>(Arrays.asList(CONTROLLER_ENDPOINT_ANNOTATION, ENDPOINT_ANNOTATION, JMX_ENDPOINT_ANNOTATION,
+				REST_CONTROLLER_ENDPOINT_ANNOTATION, SERVLET_ENDPOINT_ANNOTATION, WEB_ENDPOINT_ANNOTATION));
 	}
 
 	@Override
@@ -85,14 +122,19 @@ public class TestConfigurationMetadataAnnotationProcessor
 	}
 
 	@Override
+	protected String nameAnnotation() {
+		return NAME_ANNOTATION;
+	}
+
+	@Override
 	protected ConfigurationMetadata writeMetaData() throws Exception {
 		super.writeMetaData();
 		try {
-			File metadataFile = new File(this.outputLocation,
-					"META-INF/spring-configuration-metadata.json");
+			File metadataFile = new File(this.outputLocation, "META-INF/spring-configuration-metadata.json");
 			if (metadataFile.isFile()) {
-				this.metadata = new JsonMarshaller()
-						.read(new FileInputStream(metadataFile));
+				try (InputStream input = new FileInputStream(metadataFile)) {
+					this.metadata = new JsonMarshaller().read(input);
+				}
 			}
 			else {
 				this.metadata = new ConfigurationMetadata();

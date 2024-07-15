@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2018 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ package org.springframework.boot.web.client;
 
 import java.net.URI;
 import java.util.Map;
+import java.util.function.Function;
 
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
@@ -85,16 +86,25 @@ public class RootUriTemplateHandler implements UriTemplateHandler {
 	}
 
 	/**
+	 * Derives a new {@code RootUriTemplateHandler} from this one, wrapping its delegate
+	 * {@link UriTemplateHandler} by applying the given {@code wrapper}.
+	 * @param wrapper the wrapper to apply to the delegate URI template handler
+	 * @return the new handler
+	 * @since 2.3.10
+	 */
+	public RootUriTemplateHandler withHandlerWrapper(Function<UriTemplateHandler, UriTemplateHandler> wrapper) {
+		return new RootUriTemplateHandler(this.rootUri, wrapper.apply(this.handler));
+	}
+
+	/**
 	 * Add a {@link RootUriTemplateHandler} instance to the given {@link RestTemplate}.
 	 * @param restTemplate the {@link RestTemplate} to add the handler to
 	 * @param rootUri the root URI
 	 * @return the added {@link RootUriTemplateHandler}.
 	 */
-	public static RootUriTemplateHandler addTo(RestTemplate restTemplate,
-			String rootUri) {
+	public static RootUriTemplateHandler addTo(RestTemplate restTemplate, String rootUri) {
 		Assert.notNull(restTemplate, "RestTemplate must not be null");
-		RootUriTemplateHandler handler = new RootUriTemplateHandler(rootUri,
-				restTemplate.getUriTemplateHandler());
+		RootUriTemplateHandler handler = new RootUriTemplateHandler(rootUri, restTemplate.getUriTemplateHandler());
 		restTemplate.setUriTemplateHandler(handler);
 		return handler;
 	}

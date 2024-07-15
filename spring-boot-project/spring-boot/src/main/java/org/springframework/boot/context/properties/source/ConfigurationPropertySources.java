@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2018 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,8 +20,10 @@ import java.util.Collections;
 import java.util.stream.Stream;
 
 import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.ConfigurablePropertyResolver;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertyResolver;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.PropertySource.StubPropertySource;
 import org.springframework.core.env.PropertySources;
@@ -37,11 +39,24 @@ import org.springframework.util.Assert;
 public final class ConfigurationPropertySources {
 
 	/**
-	 * The name of the {@link PropertySource} {@link #adapt adapter}.
+	 * The name of the {@link PropertySource} {@link #attach(Environment) adapter}.
 	 */
 	private static final String ATTACHED_PROPERTY_SOURCE_NAME = "configurationProperties";
 
 	private ConfigurationPropertySources() {
+	}
+
+	/**
+	 * Create a new {@link PropertyResolver} that resolves property values against an
+	 * underlying set of {@link PropertySources}. Provides an
+	 * {@link ConfigurationPropertySource} aware and optimized alternative to
+	 * {@link PropertySourcesPropertyResolver}.
+	 * @param propertySources the set of {@link PropertySource} objects to use
+	 * @return a {@link ConfigurablePropertyResolver} implementation
+	 * @since 2.5.0
+	 */
+	public static ConfigurablePropertyResolver createPropertyResolver(MutablePropertySources propertySources) {
+		return new ConfigurationPropertySourcesPropertyResolver(propertySources);
 	}
 
 	/**
@@ -51,8 +66,7 @@ public final class ConfigurationPropertySources {
 	 * @param propertySource the property source to test
 	 * @return {@code true} if this is the attached {@link ConfigurationPropertySource}
 	 */
-	public static boolean isAttachedConfigurationPropertySource(
-			PropertySource<?> propertySource) {
+	public static boolean isAttachedConfigurationPropertySource(PropertySource<?> propertySource) {
 		return ATTACHED_PROPERTY_SOURCE_NAME.equals(propertySource.getName());
 	}
 
@@ -71,18 +85,20 @@ public final class ConfigurationPropertySources {
 	 */
 	public static void attach(Environment environment) {
 		Assert.isInstanceOf(ConfigurableEnvironment.class, environment);
-		MutablePropertySources sources = ((ConfigurableEnvironment) environment)
-				.getPropertySources();
-		PropertySource<?> attached = sources.get(ATTACHED_PROPERTY_SOURCE_NAME);
+		MutablePropertySources sources = ((ConfigurableEnvironment) environment).getPropertySources();
+		PropertySource<?> attached = getAttached(sources);
 		if (attached != null && attached.getSource() != sources) {
 			sources.remove(ATTACHED_PROPERTY_SOURCE_NAME);
 			attached = null;
 		}
 		if (attached == null) {
-			sources.addFirst(new ConfigurationPropertySourcesPropertySource(
-					ATTACHED_PROPERTY_SOURCE_NAME,
+			sources.addFirst(new ConfigurationPropertySourcesPropertySource(ATTACHED_PROPERTY_SOURCE_NAME,
 					new SpringConfigurationPropertySources(sources)));
 		}
+	}
+
+	static PropertySource<?> getAttached(MutablePropertySources sources) {
+		return (sources != null) ? sources.get(ATTACHED_PROPERTY_SOURCE_NAME) : null;
 	}
 
 	/**
@@ -96,8 +112,7 @@ public final class ConfigurationPropertySources {
 	 */
 	public static Iterable<ConfigurationPropertySource> get(Environment environment) {
 		Assert.isInstanceOf(ConfigurableEnvironment.class, environment);
-		MutablePropertySources sources = ((ConfigurableEnvironment) environment)
-				.getPropertySources();
+		MutablePropertySources sources = ((ConfigurableEnvironment) environment).getPropertySources();
 		ConfigurationPropertySourcesPropertySource attached = (ConfigurationPropertySourcesPropertySource) sources
 				.get(ATTACHED_PROPERTY_SOURCE_NAME);
 		if (attached == null) {
@@ -114,7 +129,7 @@ public final class ConfigurationPropertySources {
 	 * {@link SpringConfigurationPropertySource}
 	 */
 	public static Iterable<ConfigurationPropertySource> from(PropertySource<?> source) {
-		return Collections.singleton(SpringConfigurationPropertySource.from(source));
+		return Collections.singleton(ConfigurationPropertySource.from(source));
 	}
 
 	/**
@@ -130,21 +145,18 @@ public final class ConfigurationPropertySources {
 	 * @return an {@link Iterable} containing newly adapted
 	 * {@link SpringConfigurationPropertySource} instances
 	 */
-	public static Iterable<ConfigurationPropertySource> from(
-			Iterable<PropertySource<?>> sources) {
+	public static Iterable<ConfigurationPropertySource> from(Iterable<PropertySource<?>> sources) {
 		return new SpringConfigurationPropertySources(sources);
 	}
 
-	private static Stream<PropertySource<?>> streamPropertySources(
-			PropertySources sources) {
+	private static Stream<PropertySource<?>> streamPropertySources(PropertySources sources) {
 		return sources.stream().flatMap(ConfigurationPropertySources::flatten)
 				.filter(ConfigurationPropertySources::isIncluded);
 	}
 
 	private static Stream<PropertySource<?>> flatten(PropertySource<?> source) {
 		if (source.getSource() instanceof ConfigurableEnvironment) {
-			return streamPropertySources(
-					((ConfigurableEnvironment) source.getSource()).getPropertySources());
+			return streamPropertySources(((ConfigurableEnvironment) source.getSource()).getPropertySources());
 		}
 		return Stream.of(source);
 	}

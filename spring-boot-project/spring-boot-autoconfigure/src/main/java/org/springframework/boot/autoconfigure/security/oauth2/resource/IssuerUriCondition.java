@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2018 the original author or authors.
+ * Copyright 2012-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.springframework.boot.autoconfigure.security.oauth2.resource;
 
 import org.springframework.boot.autoconfigure.condition.ConditionMessage;
@@ -33,22 +34,16 @@ import org.springframework.util.StringUtils;
 public class IssuerUriCondition extends SpringBootCondition {
 
 	@Override
-	public ConditionOutcome getMatchOutcome(ConditionContext context,
-			AnnotatedTypeMetadata metadata) {
-		ConditionMessage.Builder message = ConditionMessage
-				.forCondition("OpenID Connect Issuer URI Condition");
+	public ConditionOutcome getMatchOutcome(ConditionContext context, AnnotatedTypeMetadata metadata) {
+		ConditionMessage.Builder message = ConditionMessage.forCondition("OpenID Connect Issuer URI Condition");
 		Environment environment = context.getEnvironment();
-		String issuerUri = environment
-				.getProperty("spring.security.oauth2.resourceserver.jwt.issuer-uri");
-		String jwkSetUri = environment
-				.getProperty("spring.security.oauth2.resourceserver.jwt.jwk-set-uri");
+		String issuerUri = environment.getProperty("spring.security.oauth2.resourceserver.jwt.issuer-uri");
+		String jwkSetUri = environment.getProperty("spring.security.oauth2.resourceserver.jwt.jwk-set-uri");
 		if (!StringUtils.hasText(issuerUri)) {
-			return ConditionOutcome
-					.noMatch(message.didNotFind("issuer-uri property").atAll());
+			return ConditionOutcome.noMatch(message.didNotFind("issuer-uri property").atAll());
 		}
 		if (StringUtils.hasText(jwkSetUri)) {
-			return ConditionOutcome
-					.noMatch(message.found("jwk-set-uri property").items(jwkSetUri));
+			return ConditionOutcome.noMatch(message.found("jwk-set-uri property").items(jwkSetUri));
 		}
 		return ConditionOutcome.match(message.foundExactly("issuer-uri property"));
 	}

@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,8 +20,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-import javax.annotation.PostConstruct;
-
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.StringUtils;
 
@@ -32,9 +31,10 @@ import org.springframework.util.StringUtils;
  * @author Phillip Webb
  * @author Artsiom Yudovin
  * @author MyeongHyeon Lee
+ * @since 2.0.0
  */
 @ConfigurationProperties(prefix = "spring.security.oauth2.client")
-public class OAuth2ClientProperties {
+public class OAuth2ClientProperties implements InitializingBean {
 
 	/**
 	 * OAuth provider details.
@@ -54,9 +54,13 @@ public class OAuth2ClientProperties {
 		return this.registration;
 	}
 
-	@PostConstruct
+	@Override
+	public void afterPropertiesSet() {
+		validate();
+	}
+
 	public void validate() {
-		this.getRegistration().values().forEach(this::validateRegistration);
+		getRegistration().values().forEach(this::validateRegistration);
 	}
 
 	private void validateRegistration(Registration registration) {
@@ -104,7 +108,8 @@ public class OAuth2ClientProperties {
 		private String redirectUri;
 
 		/**
-		 * Authorization scopes. May be left blank when using a pre-defined provider.
+		 * Authorization scopes. When left blank the provider's default scopes, if any,
+		 * will be used.
 		 */
 		private Set<String> scope;
 
@@ -213,7 +218,8 @@ public class OAuth2ClientProperties {
 		private String jwkSetUri;
 
 		/**
-		 * URI that an OpenID Connect Provider asserts as its Issuer Identifier.
+		 * URI that can either be an OpenID Connect discovery endpoint or an OAuth 2.0
+		 * Authorization Server Metadata endpoint defined by RFC 8414.
 		 */
 		private String issuerUri;
 

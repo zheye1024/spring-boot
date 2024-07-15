@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -45,6 +45,7 @@ import org.springframework.boot.autoconfigure.transaction.TransactionAutoConfigu
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -57,25 +58,21 @@ import org.springframework.transaction.PlatformTransactionManager;
  * @author Dmytro Nosan
  * @since 1.3.0
  */
-@Configuration
+@Configuration(proxyBeanMethods = false)
 @ConditionalOnClass(DSLContext.class)
 @ConditionalOnBean(DataSource.class)
-@AutoConfigureAfter({ DataSourceAutoConfiguration.class,
-		TransactionAutoConfiguration.class })
+@AutoConfigureAfter({ DataSourceAutoConfiguration.class, TransactionAutoConfiguration.class })
 public class JooqAutoConfiguration {
 
 	@Bean
-	@ConditionalOnMissingBean
-	public DataSourceConnectionProvider dataSourceConnectionProvider(
-			DataSource dataSource) {
-		return new DataSourceConnectionProvider(
-				new TransactionAwareDataSourceProxy(dataSource));
+	@ConditionalOnMissingBean(ConnectionProvider.class)
+	public DataSourceConnectionProvider dataSourceConnectionProvider(DataSource dataSource) {
+		return new DataSourceConnectionProvider(new TransactionAwareDataSourceProxy(dataSource));
 	}
 
 	@Bean
 	@ConditionalOnBean(PlatformTransactionManager.class)
-	public SpringTransactionProvider transactionProvider(
-			PlatformTransactionManager txManager) {
+	public SpringTransactionProvider transactionProvider(PlatformTransactionManager txManager) {
 		return new SpringTransactionProvider(txManager);
 	}
 
@@ -85,7 +82,7 @@ public class JooqAutoConfiguration {
 		return new DefaultExecuteListenerProvider(new JooqExceptionTranslator());
 	}
 
-	@Configuration
+	@Configuration(proxyBeanMethods = false)
 	@ConditionalOnMissingBean(DSLContext.class)
 	@EnableConfigurationProperties(JooqProperties.class)
 	public static class DslContextConfiguration {
@@ -97,34 +94,59 @@ public class JooqAutoConfiguration {
 
 		@Bean
 		@ConditionalOnMissingBean(org.jooq.Configuration.class)
-		public DefaultConfiguration jooqConfiguration(JooqProperties properties,
-				ConnectionProvider connectionProvider, DataSource dataSource,
-				ObjectProvider<TransactionProvider> transactionProvider,
-				ObjectProvider<RecordMapperProvider> recordMapperProvider,
-				ObjectProvider<RecordUnmapperProvider> recordUnmapperProvider,
-				ObjectProvider<Settings> settings,
-				ObjectProvider<RecordListenerProvider> recordListenerProviders,
-				ObjectProvider<ExecuteListenerProvider> executeListenerProviders,
-				ObjectProvider<VisitListenerProvider> visitListenerProviders,
-				ObjectProvider<TransactionListenerProvider> transactionListenerProviders,
-				ObjectProvider<ExecutorProvider> executorProvider) {
+		public DefaultConfiguration jooqConfiguration(JooqProperties properties, ConnectionProvider connectionProvider,
+				DataSource dataSource, ObjectProvider<ExecuteListenerProvider> executeListenerProviders,
+				ObjectProvider<DefaultConfigurationCustomizer> configurationCustomizers) {
 			DefaultConfiguration configuration = new DefaultConfiguration();
 			configuration.set(properties.determineSqlDialect(dataSource));
 			configuration.set(connectionProvider);
-			transactionProvider.ifAvailable(configuration::set);
-			recordMapperProvider.ifAvailable(configuration::set);
-			recordUnmapperProvider.ifAvailable(configuration::set);
-			settings.ifAvailable(configuration::set);
-			executorProvider.ifAvailable(configuration::set);
-			configuration.set(recordListenerProviders.orderedStream()
-					.toArray(RecordListenerProvider[]::new));
-			configuration.set(executeListenerProviders.orderedStream()
-					.toArray(ExecuteListenerProvider[]::new));
-			configuration.set(visitListenerProviders.orderedStream()
-					.toArray(VisitListenerProvider[]::new));
-			configuration.setTransactionListenerProvider(transactionListenerProviders
-					.orderedStream().toArray(TransactionListenerProvider[]::new));
+			configuration.set(executeListenerProviders.orderedStream().toArray(ExecuteListenerProvider[]::new));
+			configurationCustomizers.orderedStream().forEach((customizer) -> customizer.customize(configuration));
 			return configuration;
+		}
+
+		@Bean
+		@Deprecated
+		public DefaultConfigurationCustomizer jooqProvidersDefaultConfigurationCustomizer(
+				ObjectProvider<TransactionProvider> transactionProvider,
+				ObjectProvider<RecordMapperProvider> recordMapperProvider,
+				ObjectProvider<RecordUnmapperProvider> recordUnmapperProvider, ObjectProvider<Settings> settings,
+				ObjectProvider<RecordListenerProvider> recordListenerProviders,
+				ObjectProvider<VisitListenerProvider> visitListenerProviders,
+				ObjectProvider<TransactionListenerProvider> transactionListenerProviders,
+				ObjectProvider<ExecutorProvider> executorProvider) {
+			return new OrderedDefaultConfigurationCustomizer((configuration) -> {
+				transactionProvider.ifAvailable(configuration::set);
+				recordMapperProvider.ifAvailable(configuration::set);
+				recordUnmapperProvider.ifAvailable(configuration::set);
+				settings.ifAvailable(configuration::set);
+				executorProvider.ifAvailable(configuration::set);
+				configuration.set(recordListenerProviders.orderedStream().toArray(RecordListenerProvider[]::new));
+				configuration.set(visitListenerProviders.orderedStream().toArray(VisitListenerProvider[]::new));
+				configuration.setTransactionListenerProvider(
+						transactionListenerProviders.orderedStream().toArray(TransactionListenerProvider[]::new));
+			});
+		}
+
+	}
+
+	private static class OrderedDefaultConfigurationCustomizer implements DefaultConfigurationCustomizer, Ordered {
+
+		private final DefaultConfigurationCustomizer delegate;
+
+		OrderedDefaultConfigurationCustomizer(DefaultConfigurationCustomizer delegate) {
+			this.delegate = delegate;
+		}
+
+		@Override
+		public void customize(DefaultConfiguration configuration) {
+			this.delegate.customize(configuration);
+
+		}
+
+		@Override
+		public int getOrder() {
+			return 0;
 		}
 
 	}

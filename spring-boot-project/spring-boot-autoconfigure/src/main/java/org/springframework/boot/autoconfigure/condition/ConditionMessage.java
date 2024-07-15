@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,7 +37,7 @@ import org.springframework.util.StringUtils;
  */
 public final class ConditionMessage {
 
-	private String message;
+	private final String message;
 
 	private ConditionMessage() {
 		this(null);
@@ -106,8 +106,7 @@ public final class ConditionMessage {
 	 * @see #andCondition(String, Object...)
 	 * @see #forCondition(Class, Object...)
 	 */
-	public Builder andCondition(Class<? extends Annotation> condition,
-			Object... details) {
+	public Builder andCondition(Class<? extends Annotation> condition, Object... details) {
 		Assert.notNull(condition, "Condition must not be null");
 		return andCondition("@" + ClassUtils.getShortName(condition), details);
 	}
@@ -177,8 +176,7 @@ public final class ConditionMessage {
 	 * @see #forCondition(String, Object...)
 	 * @see #andCondition(String, Object...)
 	 */
-	public static Builder forCondition(Class<? extends Annotation> condition,
-			Object... details) {
+	public static Builder forCondition(Class<? extends Annotation> condition, Object... details) {
 		return new ConditionMessage().andCondition(condition, details);
 	}
 
@@ -292,23 +290,23 @@ public final class ConditionMessage {
 		}
 
 		/**
-		 * Indicates the reason. For example {@code reason("running Linux")} results in
+		 * Indicates the reason. For example {@code because("running Linux")} results in
 		 * the message "running Linux".
 		 * @param reason the reason for the message
 		 * @return a built {@link ConditionMessage}
 		 */
 		public ConditionMessage because(String reason) {
-			if (StringUtils.isEmpty(reason)) {
-				return new ConditionMessage(ConditionMessage.this, this.condition);
+			if (StringUtils.hasLength(reason)) {
+				return new ConditionMessage(ConditionMessage.this,
+						StringUtils.hasLength(this.condition) ? this.condition + " " + reason : reason);
 			}
-			return new ConditionMessage(ConditionMessage.this, this.condition
-					+ (StringUtils.isEmpty(this.condition) ? "" : " ") + reason);
+			return new ConditionMessage(ConditionMessage.this, this.condition);
 		}
 
 	}
 
 	/**
-	 * Builder used to create a {@link ItemsBuilder} for a condition.
+	 * Builder used to create an {@link ItemsBuilder} for a condition.
 	 */
 	public final class ItemsBuilder {
 
@@ -320,8 +318,7 @@ public final class ConditionMessage {
 
 		private final String plural;
 
-		private ItemsBuilder(Builder condition, String reason, String singular,
-				String plural) {
+		private ItemsBuilder(Builder condition, String reason, String singular, String plural) {
 			this.condition = condition;
 			this.reason = reason;
 			this.singular = singular;
@@ -384,7 +381,7 @@ public final class ConditionMessage {
 			Assert.notNull(style, "Style must not be null");
 			StringBuilder message = new StringBuilder(this.reason);
 			items = style.applyTo(items);
-			if ((this.condition == null || items.size() <= 1)
+			if ((this.condition == null || items == null || items.size() <= 1)
 					&& StringUtils.hasLength(this.singular)) {
 				message.append(" ").append(this.singular);
 			}
@@ -392,8 +389,7 @@ public final class ConditionMessage {
 				message.append(" ").append(this.plural);
 			}
 			if (items != null && !items.isEmpty()) {
-				message.append(" ")
-						.append(StringUtils.collectionToDelimitedString(items, ", "));
+				message.append(" ").append(StringUtils.collectionToDelimitedString(items, ", "));
 			}
 			return this.condition.because(message.toString());
 		}
@@ -405,22 +401,35 @@ public final class ConditionMessage {
 	 */
 	public enum Style {
 
+		/**
+		 * Render with normal styling.
+		 */
 		NORMAL {
+
 			@Override
 			protected Object applyToItem(Object item) {
 				return item;
 			}
+
 		},
 
+		/**
+		 * Render with the item surrounded by quotes.
+		 */
 		QUOTE {
+
 			@Override
 			protected String applyToItem(Object item) {
 				return (item != null) ? "'" + item + "'" : null;
 			}
+
 		};
 
 		public Collection<?> applyTo(Collection<?> items) {
-			List<Object> result = new ArrayList<>();
+			if (items == null) {
+				return null;
+			}
+			List<Object> result = new ArrayList<>(items.size());
 			for (Object item : items) {
 				result.add(applyToItem(item));
 			}

@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,16 +20,16 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import javax.annotation.PostConstruct;
-
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.BeanFactoryAware;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.hateoas.mediatype.hal.HalConfiguration;
 import org.springframework.hateoas.server.mvc.TypeConstrainedMappingJackson2HttpMessageConverter;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.AbstractHttpMessageConverter;
@@ -41,12 +41,17 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  * enabled.
  *
  * @author Andy Wilkinson
+ * @since 1.3.0
+ * @deprecated since 2.5.0 for removal in 2.7.0 in favor of a {@link HalConfiguration}
+ * bean
  */
-@Configuration
+@Deprecated
+@Configuration(proxyBeanMethods = false)
 public class HypermediaHttpMessageConverterConfiguration {
 
 	@Bean
-	@ConditionalOnProperty(prefix = "spring.hateoas", name = "use-hal-as-default-json-media-type", matchIfMissing = true)
+	@ConditionalOnProperty(prefix = "spring.hateoas", name = "use-hal-as-default-json-media-type",
+			matchIfMissing = true)
 	public static HalMessageConverterSupportedMediaTypesCustomizer halMessageConverterSupportedMediaTypeCustomizer() {
 		return new HalMessageConverterSupportedMediaTypesCustomizer();
 	}
@@ -59,23 +64,21 @@ public class HypermediaHttpMessageConverterConfiguration {
 	 * it is unordered.
 	 */
 	private static class HalMessageConverterSupportedMediaTypesCustomizer
-			implements BeanFactoryAware {
+			implements BeanFactoryAware, InitializingBean {
 
 		private volatile BeanFactory beanFactory;
 
-		@PostConstruct
-		public void configureHttpMessageConverters() {
+		@Override
+		public void afterPropertiesSet() {
 			if (this.beanFactory instanceof ListableBeanFactory) {
 				configureHttpMessageConverters(((ListableBeanFactory) this.beanFactory)
 						.getBeansOfType(RequestMappingHandlerAdapter.class).values());
 			}
 		}
 
-		private void configureHttpMessageConverters(
-				Collection<RequestMappingHandlerAdapter> handlerAdapters) {
+		private void configureHttpMessageConverters(Collection<RequestMappingHandlerAdapter> handlerAdapters) {
 			for (RequestMappingHandlerAdapter handlerAdapter : handlerAdapters) {
-				for (HttpMessageConverter<?> messageConverter : handlerAdapter
-						.getMessageConverters()) {
+				for (HttpMessageConverter<?> messageConverter : handlerAdapter.getMessageConverters()) {
 					configureHttpMessageConverter(messageConverter);
 				}
 			}
@@ -83,13 +86,11 @@ public class HypermediaHttpMessageConverterConfiguration {
 
 		private void configureHttpMessageConverter(HttpMessageConverter<?> converter) {
 			if (converter instanceof TypeConstrainedMappingJackson2HttpMessageConverter) {
-				List<MediaType> supportedMediaTypes = new ArrayList<>(
-						converter.getSupportedMediaTypes());
+				List<MediaType> supportedMediaTypes = new ArrayList<>(converter.getSupportedMediaTypes());
 				if (!supportedMediaTypes.contains(MediaType.APPLICATION_JSON)) {
 					supportedMediaTypes.add(MediaType.APPLICATION_JSON);
 				}
-				((AbstractHttpMessageConverter<?>) converter)
-						.setSupportedMediaTypes(supportedMediaTypes);
+				((AbstractHttpMessageConverter<?>) converter).setSupportedMediaTypes(supportedMediaTypes);
 			}
 		}
 

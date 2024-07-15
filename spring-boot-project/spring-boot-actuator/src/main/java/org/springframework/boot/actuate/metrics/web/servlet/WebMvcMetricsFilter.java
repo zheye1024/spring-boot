@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,10 +17,8 @@
 package org.springframework.boot.actuate.metrics.web.servlet;
 
 import java.io.IOException;
-import java.lang.reflect.AnnotatedElement;
 import java.util.Collections;
 import java.util.Set;
-import java.util.function.Supplier;
 
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
@@ -29,12 +27,13 @@ import javax.servlet.http.HttpServletResponse;
 
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.Timer.Builder;
 import io.micrometer.core.instrument.Timer.Sample;
 
-import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.boot.actuate.metrics.AutoTimer;
+import org.springframework.boot.actuate.metrics.annotation.TimedAnnotations;
+import org.springframework.boot.web.servlet.error.ErrorAttributes;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.method.HandlerMethod;
@@ -43,11 +42,12 @@ import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.util.NestedServletException;
 
 /**
- * Intercepts incoming HTTP requests and records metrics about Spring MVC execution time
- * and results.
+ * Intercepts incoming HTTP requests handled by Spring MVC handlers and records metrics
+ * about execution time and results.
  *
  * @author Jon Schneider
  * @author Phillip Webb
+ * @author Chanhyeong LEE
  * @since 2.0.0
  */
 public class WebMvcMetricsFilter extends OncePerRequestFilter {
@@ -58,22 +58,22 @@ public class WebMvcMetricsFilter extends OncePerRequestFilter {
 
 	private final String metricName;
 
-	private final boolean autoTimeRequests;
+	private final AutoTimer autoTimer;
 
 	/**
 	 * Create a new {@link WebMvcMetricsFilter} instance.
 	 * @param registry the meter registry
 	 * @param tagsProvider the tags provider
 	 * @param metricName the metric name
-	 * @param autoTimeRequests if requests should be automatically timed
-	 * @since 2.0.7
+	 * @param autoTimer the auto-timers to apply or {@code null} to disable auto-timing
+	 * @since 2.2.0
 	 */
-	public WebMvcMetricsFilter(MeterRegistry registry, WebMvcTagsProvider tagsProvider,
-			String metricName, boolean autoTimeRequests) {
+	public WebMvcMetricsFilter(MeterRegistry registry, WebMvcTagsProvider tagsProvider, String metricName,
+			AutoTimer autoTimer) {
 		this.registry = registry;
 		this.tagsProvider = tagsProvider;
 		this.metricName = metricName;
-		this.autoTimeRequests = autoTimeRequests;
+		this.autoTimer = autoTimer;
 	}
 
 	@Override
@@ -82,15 +82,8 @@ public class WebMvcMetricsFilter extends OncePerRequestFilter {
 	}
 
 	@Override
-	protected void doFilterInternal(HttpServletRequest request,
-			HttpServletResponse response, FilterChain filterChain)
+	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
-		filterAndRecordMetrics(request, response, filterChain);
-	}
-
-	private void filterAndRecordMetrics(HttpServletRequest request,
-			HttpServletResponse response, FilterChain filterChain)
-			throws IOException, ServletException {
 		TimingContext timingContext = TimingContext.get(request);
 		if (timingContext == null) {
 			timingContext = startAndAttachTimingContext(request);
@@ -102,14 +95,17 @@ public class WebMvcMetricsFilter extends OncePerRequestFilter {
 				// If async was started by something further down the chain we wait
 				// until the second filter invocation (but we'll be using the
 				// TimingContext that was attached to the first)
-				Throwable exception = (Throwable) request
-						.getAttribute(DispatcherServlet.EXCEPTION_ATTRIBUTE);
-				record(timingContext, response, request, exception);
+				Throwable exception = fetchException(request);
+				record(timingContext, request, response, exception);
 			}
 		}
 		catch (NestedServletException ex) {
 			response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
-			record(timingContext, response, request, ex.getCause());
+			record(timingContext, request, response, ex.getCause());
+			throw ex;
+		}
+		catch (ServletException | IOException | RuntimeException ex) {
+			record(timingContext, request, response, ex);
 			throw ex;
 		}
 	}
@@ -121,48 +117,38 @@ public class WebMvcMetricsFilter extends OncePerRequestFilter {
 		return timingContext;
 	}
 
-	private Set<Timed> getTimedAnnotations(Object handler) {
-		if (!(handler instanceof HandlerMethod)) {
-			return Collections.emptySet();
+	private Throwable fetchException(HttpServletRequest request) {
+		Throwable exception = (Throwable) request.getAttribute(ErrorAttributes.ERROR_ATTRIBUTE);
+		if (exception == null) {
+			exception = (Throwable) request.getAttribute(DispatcherServlet.EXCEPTION_ATTRIBUTE);
 		}
-		return getTimedAnnotations((HandlerMethod) handler);
+		return exception;
 	}
 
-	private Set<Timed> getTimedAnnotations(HandlerMethod handler) {
-		Set<Timed> timed = findTimedAnnotations(handler.getMethod());
-		if (timed.isEmpty()) {
-			return findTimedAnnotations(handler.getBeanType());
-		}
-		return timed;
-	}
-
-	private Set<Timed> findTimedAnnotations(AnnotatedElement element) {
-		return AnnotationUtils.getDeclaredRepeatableAnnotations(element, Timed.class);
-	}
-
-	private void record(TimingContext timingContext, HttpServletResponse response,
-			HttpServletRequest request, Throwable exception) {
-		Object handlerObject = request
-				.getAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE);
-		Set<Timed> annotations = getTimedAnnotations(handlerObject);
+	private void record(TimingContext timingContext, HttpServletRequest request, HttpServletResponse response,
+			Throwable exception) {
+		Object handler = getHandler(request);
+		Set<Timed> annotations = getTimedAnnotations(handler);
 		Timer.Sample timerSample = timingContext.getTimerSample();
-		Supplier<Iterable<Tag>> tags = () -> this.tagsProvider.getTags(request, response,
-				handlerObject, exception);
-		if (annotations.isEmpty()) {
-			if (this.autoTimeRequests) {
-				stop(timerSample, tags, Timer.builder(this.metricName));
-			}
-		}
-		else {
-			for (Timed annotation : annotations) {
-				stop(timerSample, tags, Timer.builder(annotation, this.metricName));
-			}
-		}
+		AutoTimer.apply(this.autoTimer, this.metricName, annotations,
+				(builder) -> timerSample.stop(getTimer(builder, handler, request, response, exception)));
 	}
 
-	private void stop(Timer.Sample timerSample, Supplier<Iterable<Tag>> tags,
-			Builder builder) {
-		timerSample.stop(builder.tags(tags.get()).register(this.registry));
+	private Object getHandler(HttpServletRequest request) {
+		return request.getAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE);
+	}
+
+	private Set<Timed> getTimedAnnotations(Object handler) {
+		if (handler instanceof HandlerMethod) {
+			HandlerMethod handlerMethod = (HandlerMethod) handler;
+			return TimedAnnotations.get(handlerMethod.getMethod(), handlerMethod.getBeanType());
+		}
+		return Collections.emptySet();
+	}
+
+	private Timer getTimer(Builder builder, Object handler, HttpServletRequest request, HttpServletResponse response,
+			Throwable exception) {
+		return builder.tags(this.tagsProvider.getTags(request, response, handler, exception)).register(this.registry);
 	}
 
 	/**
@@ -179,15 +165,15 @@ public class WebMvcMetricsFilter extends OncePerRequestFilter {
 			this.timerSample = timerSample;
 		}
 
-		public Timer.Sample getTimerSample() {
+		Timer.Sample getTimerSample() {
 			return this.timerSample;
 		}
 
-		public void attachTo(HttpServletRequest request) {
+		void attachTo(HttpServletRequest request) {
 			request.setAttribute(ATTRIBUTE, this);
 		}
 
-		public static TimingContext get(HttpServletRequest request) {
+		static TimingContext get(HttpServletRequest request) {
 			return (TimingContext) request.getAttribute(ATTRIBUTE);
 		}
 

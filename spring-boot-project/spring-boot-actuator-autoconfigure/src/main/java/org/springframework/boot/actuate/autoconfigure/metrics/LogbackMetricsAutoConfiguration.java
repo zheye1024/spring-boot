@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,8 +43,8 @@ import org.springframework.core.type.AnnotatedTypeMetadata;
  * @author Stephane Nicoll
  * @since 2.1.0
  */
-@Configuration
-@AutoConfigureAfter(MetricsAutoConfiguration.class)
+@Configuration(proxyBeanMethods = false)
+@AutoConfigureAfter({ MetricsAutoConfiguration.class, CompositeMeterRegistryAutoConfiguration.class })
 @ConditionalOnClass({ MeterRegistry.class, LoggerContext.class, LoggerFactory.class })
 @ConditionalOnBean(MeterRegistry.class)
 @Conditional(LogbackLoggingCondition.class)
@@ -59,18 +59,14 @@ public class LogbackMetricsAutoConfiguration {
 	static class LogbackLoggingCondition extends SpringBootCondition {
 
 		@Override
-		public ConditionOutcome getMatchOutcome(ConditionContext context,
-				AnnotatedTypeMetadata metadata) {
+		public ConditionOutcome getMatchOutcome(ConditionContext context, AnnotatedTypeMetadata metadata) {
 			ILoggerFactory loggerFactory = LoggerFactory.getILoggerFactory();
-			ConditionMessage.Builder message = ConditionMessage
-					.forCondition("LogbackLoggingCondition");
+			ConditionMessage.Builder message = ConditionMessage.forCondition("LogbackLoggingCondition");
 			if (loggerFactory instanceof LoggerContext) {
-				return ConditionOutcome.match(
-						message.because("ILoggerFactory is a Logback LoggerContext"));
+				return ConditionOutcome.match(message.because("ILoggerFactory is a Logback LoggerContext"));
 			}
-			return ConditionOutcome
-					.noMatch(message.because("ILoggerFactory is an instance of "
-							+ loggerFactory.getClass().getCanonicalName()));
+			return ConditionOutcome.noMatch(
+					message.because("ILoggerFactory is an instance of " + loggerFactory.getClass().getCanonicalName()));
 		}
 
 	}

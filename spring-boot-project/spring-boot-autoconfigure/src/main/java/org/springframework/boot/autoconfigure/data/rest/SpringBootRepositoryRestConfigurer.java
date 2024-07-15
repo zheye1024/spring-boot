@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2018 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,11 +18,11 @@ package org.springframework.boot.autoconfigure.data.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.data.rest.core.config.RepositoryRestConfiguration;
 import org.springframework.data.rest.webmvc.config.RepositoryRestConfigurer;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
 
 /**
  * A {@code RepositoryRestConfigurer} that applies configuration items from the
@@ -36,14 +36,18 @@ import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 @Order(0)
 class SpringBootRepositoryRestConfigurer implements RepositoryRestConfigurer {
 
-	@Autowired(required = false)
-	private Jackson2ObjectMapperBuilder objectMapperBuilder;
+	private final Jackson2ObjectMapperBuilder objectMapperBuilder;
 
-	@Autowired
-	private RepositoryRestProperties properties;
+	private final RepositoryRestProperties properties;
+
+	SpringBootRepositoryRestConfigurer(Jackson2ObjectMapperBuilder objectMapperBuilder,
+			RepositoryRestProperties properties) {
+		this.objectMapperBuilder = objectMapperBuilder;
+		this.properties = properties;
+	}
 
 	@Override
-	public void configureRepositoryRestConfiguration(RepositoryRestConfiguration config) {
+	public void configureRepositoryRestConfiguration(RepositoryRestConfiguration config, CorsRegistry cors) {
 		this.properties.applyTo(config);
 	}
 

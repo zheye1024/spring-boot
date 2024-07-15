@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2018 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,9 +17,9 @@
 package org.springframework.boot.web.embedded.jetty;
 
 import java.io.IOException;
-import java.net.BindException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.apache.commons.logging.Log;
@@ -31,13 +31,14 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.HandlerCollection;
 import org.eclipse.jetty.server.handler.HandlerWrapper;
-import org.eclipse.jetty.util.component.AbstractLifeCycle;
+import org.eclipse.jetty.server.handler.StatisticsHandler;
 
+import org.springframework.boot.web.server.GracefulShutdownCallback;
+import org.springframework.boot.web.server.GracefulShutdownResult;
 import org.springframework.boot.web.server.PortInUseException;
 import org.springframework.boot.web.server.WebServer;
 import org.springframework.boot.web.server.WebServerException;
 import org.springframework.util.Assert;
-import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
 /**
@@ -62,6 +63,8 @@ public class JettyWebServer implements WebServer {
 
 	private final boolean autoStart;
 
+	private final GracefulShutdown gracefulShutdown;
+
 	private Connector[] connectors;
 
 	private volatile boolean started;
@@ -83,7 +86,30 @@ public class JettyWebServer implements WebServer {
 		this.autoStart = autoStart;
 		Assert.notNull(server, "Jetty Server must not be null");
 		this.server = server;
+		this.gracefulShutdown = createGracefulShutdown(server);
 		initialize();
+	}
+
+	private GracefulShutdown createGracefulShutdown(Server server) {
+		StatisticsHandler statisticsHandler = findStatisticsHandler(server);
+		if (statisticsHandler == null) {
+			return null;
+		}
+		return new GracefulShutdown(server, statisticsHandler::getRequestsActive);
+	}
+
+	private StatisticsHandler findStatisticsHandler(Server server) {
+		return findStatisticsHandler(server.getHandler());
+	}
+
+	private StatisticsHandler findStatisticsHandler(Handler handler) {
+		if (handler instanceof StatisticsHandler) {
+			return (StatisticsHandler) handler;
+		}
+		if (handler instanceof HandlerWrapper) {
+			return findStatisticsHandler(((HandlerWrapper) handler).getHandler());
+		}
+		return null;
 	}
 
 	private void initialize() {
@@ -92,18 +118,7 @@ public class JettyWebServer implements WebServer {
 				// Cache the connectors and then remove them to prevent requests being
 				// handled before the application context is ready.
 				this.connectors = this.server.getConnectors();
-				this.server.addBean(new AbstractLifeCycle() {
-
-					@Override
-					protected void doStart() throws Exception {
-						for (Connector connector : JettyWebServer.this.connectors) {
-							Assert.state(connector.isStopped(), () -> "Connector "
-									+ connector + " has been started prematurely");
-						}
-						JettyWebServer.this.server.setConnectors(null);
-					}
-
-				});
+				JettyWebServer.this.server.setConnectors(null);
 				// Start the server so that the ServletContext is available
 				this.server.start();
 				this.server.setStopAtShutdown(false);
@@ -111,8 +126,7 @@ public class JettyWebServer implements WebServer {
 			catch (Throwable ex) {
 				// Ensure process isn't left running
 				stopSilently();
-				throw new WebServerException("Unable to start embedded Jetty web server",
-						ex);
+				throw new WebServerException("Unable to start embedded Jetty web server", ex);
 			}
 		}
 	}
@@ -147,17 +161,16 @@ public class JettyWebServer implements WebServer {
 						connector.start();
 					}
 					catch (IOException ex) {
-						if (connector instanceof NetworkConnector
-								&& findBindException(ex) != null) {
-							throw new PortInUseException(
-									((NetworkConnector) connector).getPort());
+						if (connector instanceof NetworkConnector) {
+							PortInUseException.throwIfPortBindingException(ex,
+									() -> ((NetworkConnector) connector).getPort());
 						}
 						throw ex;
 					}
 				}
 				this.started = true;
-				logger.info("Jetty started on port(s) " + getActualPortsDescription()
-						+ " with context path '" + getContextPath() + "'");
+				logger.info("Jetty started on port(s) " + getActualPortsDescription() + " with context path '"
+						+ getContextPath() + "'");
 			}
 			catch (WebServerException ex) {
 				stopSilently();
@@ -168,16 +181,6 @@ public class JettyWebServer implements WebServer {
 				throw new WebServerException("Unable to start embedded Jetty server", ex);
 			}
 		}
-	}
-
-	private BindException findBindException(Throwable ex) {
-		if (ex == null) {
-			return null;
-		}
-		if (ex instanceof BindException) {
-			return (BindException) ex;
-		}
-		return findBindException(ex.getCause());
 	}
 
 	private String getActualPortsDescription() {
@@ -191,28 +194,24 @@ public class JettyWebServer implements WebServer {
 		return ports.toString();
 	}
 
-	private Integer getLocalPort(Connector connector) {
-		try {
-			// Jetty 9 internals are different, but the method name is the same
-			return (Integer) ReflectionUtils.invokeMethod(
-					ReflectionUtils.findMethod(connector.getClass(), "getLocalPort"),
-					connector);
-		}
-		catch (Exception ex) {
-			logger.info("could not determine port ( " + ex.getMessage() + ")");
-			return 0;
-		}
-	}
-
 	private String getProtocols(Connector connector) {
 		List<String> protocols = connector.getProtocols();
 		return " (" + StringUtils.collectionToDelimitedString(protocols, ", ") + ")";
 	}
 
 	private String getContextPath() {
-		return Arrays.stream(this.server.getHandlers())
-				.filter(ContextHandler.class::isInstance).map(ContextHandler.class::cast)
+		return Arrays.stream(this.server.getHandlers()).map(this::findContextHandler).filter(Objects::nonNull)
 				.map(ContextHandler::getContextPath).collect(Collectors.joining(" "));
+	}
+
+	private ContextHandler findContextHandler(Handler handler) {
+		while (handler instanceof HandlerWrapper) {
+			if (handler instanceof ContextHandler) {
+				return (ContextHandler) handler;
+			}
+			handler = ((HandlerWrapper) handler).getHandler();
+		}
+		return null;
 	}
 
 	private void handleDeferredInitialize(Handler... handlers) throws Exception {
@@ -233,6 +232,9 @@ public class JettyWebServer implements WebServer {
 	public void stop() {
 		synchronized (this.monitor) {
 			this.started = false;
+			if (this.gracefulShutdown != null) {
+				this.gracefulShutdown.abort();
+			}
 			try {
 				this.server.stop();
 			}
@@ -249,10 +251,28 @@ public class JettyWebServer implements WebServer {
 	public int getPort() {
 		Connector[] connectors = this.server.getConnectors();
 		for (Connector connector : connectors) {
-			// Probably only one...
-			return getLocalPort(connector);
+			Integer localPort = getLocalPort(connector);
+			if (localPort != null && localPort > 0) {
+				return localPort;
+			}
+		}
+		return -1;
+	}
+
+	private Integer getLocalPort(Connector connector) {
+		if (connector instanceof NetworkConnector) {
+			return ((NetworkConnector) connector).getLocalPort();
 		}
 		return 0;
+	}
+
+	@Override
+	public void shutDownGracefully(GracefulShutdownCallback callback) {
+		if (this.gracefulShutdown == null) {
+			callback.shutdownComplete(GracefulShutdownResult.IMMEDIATE);
+			return;
+		}
+		this.gracefulShutdown.shutDownGracefully(callback);
 	}
 
 	/**

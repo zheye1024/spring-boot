@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2017 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,6 @@ package org.springframework.boot.autoconfigure.validation;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.BeanFactoryAware;
-import org.springframework.beans.factory.BeanFactoryUtils;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
@@ -37,9 +36,10 @@ import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
  * as primary.
  *
  * @author Stephane Nicoll
+ * @author Matej Nedic
+ * @author Andy Wilkinson
  */
-class PrimaryDefaultValidatorPostProcessor
-		implements ImportBeanDefinitionRegistrar, BeanFactoryAware {
+class PrimaryDefaultValidatorPostProcessor implements ImportBeanDefinitionRegistrar, BeanFactoryAware {
 
 	/**
 	 * The bean name of the auto-configured Validator.
@@ -56,19 +56,18 @@ class PrimaryDefaultValidatorPostProcessor
 	}
 
 	@Override
-	public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata,
-			BeanDefinitionRegistry registry) {
+	public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
 		BeanDefinition definition = getAutoConfiguredValidator(registry);
 		if (definition != null) {
-			definition.setPrimary(!hasPrimarySpringValidator(registry));
+			definition.setPrimary(!hasPrimarySpringValidator());
 		}
 	}
 
 	private BeanDefinition getAutoConfiguredValidator(BeanDefinitionRegistry registry) {
 		if (registry.containsBeanDefinition(VALIDATOR_BEAN_NAME)) {
 			BeanDefinition definition = registry.getBeanDefinition(VALIDATOR_BEAN_NAME);
-			if (definition.getRole() == BeanDefinition.ROLE_INFRASTRUCTURE && isTypeMatch(
-					VALIDATOR_BEAN_NAME, LocalValidatorFactoryBean.class)) {
+			if (definition.getRole() == BeanDefinition.ROLE_INFRASTRUCTURE
+					&& isTypeMatch(VALIDATOR_BEAN_NAME, LocalValidatorFactoryBean.class)) {
 				return definition;
 			}
 		}
@@ -79,12 +78,11 @@ class PrimaryDefaultValidatorPostProcessor
 		return this.beanFactory != null && this.beanFactory.isTypeMatch(name, type);
 	}
 
-	private boolean hasPrimarySpringValidator(BeanDefinitionRegistry registry) {
-		String[] validatorBeans = BeanFactoryUtils.beanNamesForTypeIncludingAncestors(
-				this.beanFactory, Validator.class, false, false);
+	private boolean hasPrimarySpringValidator() {
+		String[] validatorBeans = this.beanFactory.getBeanNamesForType(Validator.class, false, false);
 		for (String validatorBean : validatorBeans) {
-			BeanDefinition definition = registry.getBeanDefinition(validatorBean);
-			if (definition != null && definition.isPrimary()) {
+			BeanDefinition definition = this.beanFactory.getBeanDefinition(validatorBean);
+			if (definition.isPrimary()) {
 				return true;
 			}
 		}

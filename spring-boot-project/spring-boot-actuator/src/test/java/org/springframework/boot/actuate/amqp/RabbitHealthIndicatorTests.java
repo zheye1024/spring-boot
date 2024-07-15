@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2018 the original author or authors.
+ * Copyright 2012-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,10 +20,10 @@ import java.util.Collections;
 
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.amqp.rabbit.core.ChannelCallback;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -41,7 +41,8 @@ import static org.mockito.Mockito.mock;
  *
  * @author Phillip Webb
  */
-public class RabbitHealthIndicatorTests {
+@ExtendWith(MockitoExtension.class)
+class RabbitHealthIndicatorTests {
 
 	@Mock
 	private RabbitTemplate rabbitTemplate;
@@ -49,38 +50,36 @@ public class RabbitHealthIndicatorTests {
 	@Mock
 	private Channel channel;
 
-	@Before
-	public void setup() {
-		MockitoAnnotations.initMocks(this);
-		given(this.rabbitTemplate.execute(any())).willAnswer((invocation) -> {
-			ChannelCallback<?> callback = invocation.getArgument(0);
-			return callback.doInRabbit(this.channel);
-		});
-	}
-
 	@Test
-	public void createWhenRabbitTemplateIsNullShouldThrowException() {
-		assertThatIllegalArgumentException()
-				.isThrownBy(() -> new RabbitHealthIndicator(null))
+	void createWhenRabbitTemplateIsNullShouldThrowException() {
+		assertThatIllegalArgumentException().isThrownBy(() -> new RabbitHealthIndicator(null))
 				.withMessageContaining("RabbitTemplate must not be null");
 	}
 
 	@Test
-	public void healthWhenConnectionSucceedsShouldReturnUpWithVersion() {
+	void healthWhenConnectionSucceedsShouldReturnUpWithVersion() {
+		givenTemplateExecutionWillInvokeCallback();
 		Connection connection = mock(Connection.class);
 		given(this.channel.getConnection()).willReturn(connection);
-		given(connection.getServerProperties())
-				.willReturn(Collections.singletonMap("version", "123"));
+		given(connection.getServerProperties()).willReturn(Collections.singletonMap("version", "123"));
 		Health health = new RabbitHealthIndicator(this.rabbitTemplate).health();
 		assertThat(health.getStatus()).isEqualTo(Status.UP);
 		assertThat(health.getDetails()).containsEntry("version", "123");
 	}
 
 	@Test
-	public void healthWhenConnectionFailsShouldReturnDown() {
+	void healthWhenConnectionFailsShouldReturnDown() {
+		givenTemplateExecutionWillInvokeCallback();
 		given(this.channel.getConnection()).willThrow(new RuntimeException());
 		Health health = new RabbitHealthIndicator(this.rabbitTemplate).health();
 		assertThat(health.getStatus()).isEqualTo(Status.DOWN);
+	}
+
+	private void givenTemplateExecutionWillInvokeCallback() {
+		given(this.rabbitTemplate.execute(any())).willAnswer((invocation) -> {
+			ChannelCallback<?> callback = invocation.getArgument(0);
+			return callback.doInRabbit(this.channel);
+		});
 	}
 
 }
